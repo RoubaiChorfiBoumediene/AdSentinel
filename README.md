@@ -5,6 +5,13 @@ Extension Chrome / Edge (Manifest V3) qui détecte les comportements suspects de
 
 Créée par **Roubai Chorfi Boumediene**.
 
+![Tests](https://github.com/RoubaiChorfiBoumediene/AdSentinel/actions/workflows/test.yml/badge.svg)
+![Licence MIT](https://img.shields.io/badge/licence-MIT-blue)
+
+<p align="center">
+  <img src="docs/screenshot.png" alt="Popup AdSentinel montrant des alertes critiques sur une page" width="420">
+</p>
+
 ## Installation
 
 1. Ouvrir `chrome://extensions` (ou `edge://extensions`).
@@ -40,6 +47,23 @@ et ouvrir le popup. La démo ne contacte que des domaines `.invalid` et une IP d
 | `/getAd`, cadre CloudFront anonyme | réseau | Chargeur NOAS et couche de livraison |
 
 Le bouton **Bloquer les domaines IOC connus** ajoute une règle `declarativeNetRequest` qui bloque la liste de `iocs.js`.
+Chaque alerte **critique** déclenche aussi une notification système (une seule par type et par page).
+
+## Développement
+
+Les tests de l'analyse réseau et de la corrélation tournent sous Node.js 22 ou plus récent, sans dépendance :
+
+```bash
+npm test
+```
+
+GitHub Actions les relance à chaque push. Pour régénérer les icônes après une modification du dessin :
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/make-icons.ps1
+```
+
+La capture du README vient de `docs/preview.html`, qui affiche le vrai popup avec des alertes d'exemple.
 
 ## Structure
 
@@ -48,6 +72,9 @@ Le bouton **Bloquer les domaines IOC connus** ajoute une règle `declarativeNetR
 - `background.js` : analyse réseau (`webRequest`), corrélation par cadre, badge et blocage.
 - `iocs.js` : indicateurs de compromission et serveurs DoH ; à mettre à jour.
 - `popup.*` : interface des alertes, export JSON.
+- `icons/` : icônes générées par `scripts/make-icons.ps1`.
+- `tests/` : tests Node.js avec un faux objet `chrome`.
+- `docs/` : page d'aperçu et capture d'écran.
 
 ## Limites
 

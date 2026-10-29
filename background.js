@@ -40,9 +40,24 @@ async function addAlert(tabId, alert) {
   } else {
     state.alerts.push({ ...alert, count: 1, ts: alert.ts || Date.now(), lastTs: Date.now() });
     if (state.alerts.length > MAX_ALERTS) state.alerts.shift();
+    if (alert.severity === 'critical') notifyCritical(tabId, state, alert);
   }
   await chrome.storage.session.set({ [storageKey(tabId)]: state });
   await updateBadge(tabId, state.alerts);
+}
+
+// Une seule notification système par type d'alerte critique et par page.
+function notifyCritical(tabId, state, alert) {
+  state.notified = state.notified || [];
+  if (state.notified.includes(alert.type)) return;
+  state.notified.push(alert.type);
+  chrome.notifications.create(`adsentinel-${tabId}-${alert.type}`, {
+    type: 'basic',
+    iconUrl: 'icons/icon128.png',
+    title: 'AdSentinel : alerte critique',
+    message: alert.detail,
+    priority: 2
+  }).catch(() => {});
 }
 
 async function updateBadge(tabId, alerts) {

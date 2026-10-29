@@ -73,6 +73,7 @@ button {
   background: var(--card);
   color: var(--fg);
   cursor: pointer;
+  white-space: nowrap;
 }
 button:hover { border-color: var(--muted); }
 

@@ -1,0 +1,59 @@
+<!doctype html>
+<!-- Affiche le vrai popup avec des alertes d'exemple, pour la capture d'écran du README. -->
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>AdSentinel – Aperçu du popup</title>
+  <link rel="stylesheet" href="../popup.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1>AdSentinel</h1>
+      <p id="host" class="muted"></p>
+    </div>
+    <div id="verdict" class="verdict"></div>
+  </header>
+
+  <section class="controls">
+    <label class="toggle">
+      <input type="checkbox" id="blocking">
+      <span>Bloquer les domaines IOC connus</span>
+    </label>
+    <div class="buttons">
+      <button id="export">Exporter JSON</button>
+      <button id="clear">Effacer</button>
+    </div>
+  </section>
+
+  <ul id="alerts"></ul>
+  <p id="empty" class="muted empty" hidden>Aucun comportement suspect détecté sur cette page.</p>
+
+  <script>
+    const now = Date.parse('2026-10-29T14:32:10');
+    const SAMPLE = [
+      { type: 'spy-sdk-pattern', severity: 'critical', origin: 'corrélation', inFrame: true, source: 'about:srcdoc',
+        detail: 'Un cadre combine empreinte de l\'appareil (canvas-fp, webgl-fp, battery-fp) et contrôle à distance (websocket, dynamic-code)' },
+      { type: 'ioc-domain', severity: 'critical', origin: 'réseau', inFrame: true, source: 'https://noas.mtrtb.com/getAd',
+        detail: 'Requête vers un domaine de l\'infrastructure Discover-Tech / Candiru : noas.mtrtb.com' },
+      { type: 'cookie-exfil', severity: 'high', origin: 'réseau', inFrame: true, source: 'https://ppv2.mtrtb.com/getAd',
+        detail: 'Cookies de la page envoyés dans une URL vers ppv2.mtrtb.com' },
+      { type: 'doh-from-page', severity: 'high', origin: 'réseau', inFrame: true, source: 'https://cloudflare-dns.com/dns-query',
+        detail: 'Résolution DNS chiffrée lancée par la page : cloudflare-dns.com/dns-query' },
+      { type: 'websocket', severity: 'high', origin: 'page', inFrame: true, source: 'https://pagead.trustlayersdk.com/sdk.js',
+        detail: 'WebSocket ouvert vers wss://pagead.trustlayersdk.com/c2' },
+      { type: 'behavior-tracking', severity: 'medium', origin: 'page', inFrame: true, source: 'https://pagead.trustlayersdk.com/sdk.js',
+        detail: 'Un cadre écoute plusieurs interactions de l\'utilisateur : mousemove, keydown, scroll' }
+    ].map((a, i) => ({ ...a, count: 1, ts: now - i * 4000, lastTs: now - i * 4000 }));
+
+    // Faux `chrome` : le popup réel s'exécute tel quel avec ces données.
+    window.chrome = {
+      tabs: { query: async () => [{ id: 1, url: 'https://www.journal-exemple.fr/article' }] },
+      runtime: {
+        sendMessage: async (msg) => (msg.kind === 'get-alerts' ? SAMPLE : msg.kind === 'get-blocking' ? true : undefined)
+      }
+    };
+  </script>
+  <script src="../popup.js"></script>
+</body>
+</html>
