@@ -46,3 +46,19 @@ export const DOH_HOSTS = [
   'dns.nextdns.io',
   'dns.adguard-dns.com'
 ];
+
+// Scripts courants qui lisent leurs propres cookies ou prennent une empreinte pour
+// une raison légitime (mesure d'audience, anti-robot). Leurs lectures de cookies et
+// empreintes passent en « faible » et ne comptent pas dans le badge.
+// Le code dynamique, les WebSocket et les requêtes réseau restent toujours signalés.
+export const TRUSTED_SCRIPT_DOMAINS = [
+  'googletagmanager.com',
+  'google-analytics.com',
+  'gstatic.com',
+  'recaptcha.net',
+  'hcaptcha.com',
+  'challenges.cloudflare.com',
+  'clarity.ms',
+  'matomo.cloud',
+  'plausible.io'
+];

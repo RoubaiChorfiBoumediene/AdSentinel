@@ -62,8 +62,15 @@ const TYPE_INFO = {
   'cloudfront-frame': {
     label: 'Cadre CloudFront anonyme',
     why: 'Candiru livrait son code via des hôtes CloudFront renouvelés tous les quelques jours.'
+  },
+  'unknown-profiler': {
+    label: 'Script tiers qui profile',
+    why: 'Un domaine extérieur au site relève l\'empreinte de l\'appareil et lit les cookies : il peut te reconnaître d\'un site à l\'autre.'
   }
 };
+
+const INHERITED_ORIGIN_NOTE =
+  'Ce cadre about:blank hérite de l\'origine du site : le code de la pub voit les cookies et le stockage du site, comme décrit par Confiant.';
 
 const $ = (id) => document.getElementById(id);
 let currentTab;
@@ -78,29 +85,35 @@ function el(tag, className, text) {
 
 function render(alerts) {
   currentAlerts = alerts || [];
+  // Les scripts de confiance passent en dernier ; ils ne comptent pas dans le verdict.
   const sorted = [...currentAlerts].sort((a, b) =>
+    Number(Boolean(a.trusted)) - Number(Boolean(b.trusted)) ||
     SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] || b.lastTs - a.lastTs);
 
   const list = $('alerts');
   list.replaceChildren();
   for (const a of sorted) {
     const info = TYPE_INFO[a.type] || { label: a.type, why: '' };
-    const li = el('li', a.severity);
+    const li = el('li', a.trusted ? 'low trusted' : a.severity);
     const title = el('div', 'title');
     title.append(el('span', '', info.label + (a.count > 1 ? ` ×${a.count}` : '')),
-      el('span', 'sev', SEVERITY_LABEL[a.severity] || a.severity));
+      el('span', 'sev', a.trusted ? 'Confiance' : SEVERITY_LABEL[a.severity] || a.severity));
     li.append(title, el('div', 'detail', a.detail));
-    if (info.why) li.append(el('div', 'why', info.why));
+    if (info.why && !a.trusted) li.append(el('div', 'why', info.why));
+    if (a.trusted) li.append(el('div', 'why', 'Script connu et légitime : signalé pour information seulement.'));
+    if (a.inheritsOrigin) li.append(el('div', 'why', INHERITED_ORIGIN_NOTE));
     const time = new Date(a.lastTs || a.ts).toLocaleTimeString('fr-FR');
-    li.append(el('div', 'meta',
-      `${time} · ${a.origin || 'page'} · ${a.inFrame ? 'dans un cadre' : 'page principale'} · source : ${a.source || '?'}`));
+    const where = a.inheritsOrigin ? a.frame : a.inFrame ? 'dans un cadre' : 'page principale';
+    li.append(el('div', 'meta', `${time} · ${a.origin || 'page'} · ${where} · source : ${a.source || '?'}`));
     list.append(li);
   }
+
+  const counted = sorted.filter((a) => !a.trusted);
   $('empty').hidden = sorted.length > 0;
 
-  const worst = sorted.length ? sorted[0].severity : null;
+  const worst = counted.length ? counted[0].severity : null;
   const verdict = $('verdict');
-  verdict.textContent = worst ? `${sorted.length} alerte${sorted.length > 1 ? 's' : ''} · ${SEVERITY_LABEL[worst]}` : 'RAS';
+  verdict.textContent = worst ? `${counted.length} alerte${counted.length > 1 ? 's' : ''} · ${SEVERITY_LABEL[worst]}` : 'RAS';
   verdict.style.background = worst ? SEVERITY_COLOR[worst] : '#2e7d32';
 }
 

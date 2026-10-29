@@ -99,6 +99,78 @@ test('les alertes identiques sont regroupées avec un compteur', async () => {
   assert.equal(alerts[0].count, 2);
 });
 
+test('côté réseau, des URL différentes vers le même hôte font une seule alerte', async () => {
+  const tabId = await visit(['https://203.0.113.10/a?x=1', 'https://203.0.113.10/b?y=2']);
+  const alerts = await sendMessage(chrome, { kind: 'get-alerts', tabId });
+  assert.equal(alerts.length, 1);
+  assert.equal(alerts[0].count, 2);
+});
+
+// Événements de page tels que les envoie inject.js sur https://anime-sama.to/
+async function pageEvents(events, pageUrl = 'https://anime-sama.to/') {
+  const tabId = await visit([]);
+  for (const { frameId = 0, ...evt } of events) {
+    await sendMessage(chrome, { kind: 'page-event', evt },
+      { tab: { id: tabId, url: pageUrl }, frameId });
+  }
+  return tabId;
+}
+
+const GTM = 'https://www.googletagmanager.com/gtag/js?id=G-TEST';
+const POPUNDER = 'https://chagnougroalry.net/5/7809940/?bnr=1&dmn=a-zzz.com';
+
+test('un même script qui relit les cookies ne crée qu\'une alerte', async () => {
+  const tabId = await pageEvents([
+    { type: 'cookie-read', severity: 'medium', detail: 'Lecture (1 cookies)', source: 'https://tiers.example/a.js', inFrame: false },
+    { type: 'cookie-read', severity: 'medium', detail: 'Lecture (2 cookies)', source: 'https://tiers.example/a.js', inFrame: false }
+  ]);
+  const alerts = await sendMessage(chrome, { kind: 'get-alerts', tabId });
+  assert.equal(alerts.length, 1);
+  assert.equal(alerts[0].count, 2);
+  assert.equal(alerts[0].detail, 'Lecture (2 cookies)');
+});
+
+test('Google Tag Manager passe en confiance et ne compte pas dans le badge', async () => {
+  const tabId = await pageEvents([
+    { type: 'cookie-read', severity: 'medium', detail: 'gtm', source: GTM, inFrame: false }
+  ]);
+  const [alert] = await sendMessage(chrome, { kind: 'get-alerts', tabId });
+  assert.equal(alert.trusted, true);
+  assert.equal(alert.severity, 'low');
+  assert.equal(chrome.badges[tabId].text, '');
+});
+
+test('un script de confiance ne bénéficie pas de la confiance pour du code dynamique', async () => {
+  const tabId = await pageEvents([
+    { type: 'dynamic-code', severity: 'high', detail: 'fn', source: GTM, inFrame: true }
+  ]);
+  const [alert] = await sendMessage(chrome, { kind: 'get-alerts', tabId });
+  assert.equal(alert.trusted, undefined);
+  assert.equal(alert.severity, 'high');
+});
+
+test('cas anime-sama : un popunder qui prend l\'empreinte et lit les cookies est signalé', async () => {
+  const tabId = await pageEvents([
+    { type: 'webgl-fp', severity: 'low', detail: 'webgl', source: 'https://acscdn.com/script/aclib.js', inFrame: false },
+    { type: 'battery-fp', severity: 'low', detail: 'batterie', source: POPUNDER, inFrame: true, inheritsOrigin: true, frameId: 177 },
+    { type: 'cookie-read', severity: 'high', detail: 'cookies', source: POPUNDER, inFrame: true, inheritsOrigin: true, frameId: 177 }
+  ]);
+  const alerts = await sendMessage(chrome, { kind: 'get-alerts', tabId });
+  const profilers = alerts.filter((a) => a.type === 'unknown-profiler');
+  assert.equal(profilers.length, 1, 'acscdn (empreinte seule) ne doit pas être signalé');
+  assert.match(profilers[0].detail, /chagnougroalry\.net/);
+  assert.equal(profilers[0].severity, 'high');
+  assert.equal(profilers[0].inheritsOrigin, true);
+});
+
+test('un script du site lui-même n\'est pas un profileur tiers', async () => {
+  const tabId = await pageEvents([
+    { type: 'canvas-fp', severity: 'low', detail: 'c', source: 'https://cdn.anime-sama.to/app.js', inFrame: false },
+    { type: 'cookie-read', severity: 'medium', detail: 'k', source: 'https://cdn.anime-sama.to/app.js', inFrame: false }
+  ]);
+  assert.ok(!(await alertTypes(tabId)).includes('unknown-profiler'));
+});
+
 test('le blocage installe une règle DNR sur la liste IOC', async () => {
   await sendMessage(chrome, { kind: 'set-blocking', enabled: true });
   const rule = chrome.dynamicRules.addRules[0];

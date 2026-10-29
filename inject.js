@@ -8,6 +8,15 @@
   window[FLAG] = true;
 
   const inFrame = window !== window.top;
+  // Un cadre about:blank ou srcdoc hérite de l'origine du site : il voit ses cookies et son stockage.
+  // location.origin vaut "null" dans about:blank ; self.origin donne l'origine réellement héritée.
+  const inheritsOrigin = inFrame && /^about:(blank|srcdoc)/.test(location.href);
+  const pageOrigin = self.origin;
+  let pageHost = '';
+  try { pageHost = new URL(pageOrigin).hostname; } catch {}
+  const frameLabel = inheritsOrigin
+    ? `${location.href.split('#')[0]} (origine héritée : ${pageOrigin})`
+    : location.href.slice(0, 200);
   const counts = Object.create(null);
   const MAX_PER_TYPE = 5;
 
@@ -27,7 +36,7 @@
   function isThirdParty(src) {
     try {
       const host = new URL(src).hostname;
-      return host !== '' && baseDomain(host) !== baseDomain(location.hostname);
+      return host !== '' && baseDomain(host) !== baseDomain(pageHost);
     } catch {
       return false;
     }
@@ -41,8 +50,9 @@
       severity,
       detail: String(detail).slice(0, 300),
       source,
-      frame: location.href.slice(0, 200),
+      frame: frameLabel,
       inFrame,
+      inheritsOrigin,
       ts: Date.now()
     };
     document.dispatchEvent(new CustomEvent('__adsentinel', { detail: JSON.stringify(evt) }));
@@ -109,8 +119,10 @@
         if (value) {
           const src = callerScript();
           if (inFrame || isThirdParty(src)) {
-            report('cookie-read', inFrameOr('medium'),
-              `Lecture de document.cookie (${value.split(';').length} cookies) par ${src}`, src);
+            const n = value.split(';').length;
+            report('cookie-read', inFrameOr('medium'), inheritsOrigin
+              ? `Un cadre ${location.href.split('#')[0]} lit les ${n} cookies de ${pageOrigin} (même origine que le site) via ${src}`
+              : `Lecture de document.cookie (${n} cookies) par ${src}`, src);
           }
         }
         return value;

@@ -1,6 +1,6 @@
 // Service worker : analyse les requêtes réseau, reçoit les événements des sondes,
 // corrèle les signaux par cadre et tient le compteur d'alertes de chaque onglet.
-import { IOC_DOMAINS, DOH_HOSTS } from './iocs.js';
+import { IOC_DOMAINS, DOH_HOSTS, TRUSTED_SCRIPT_DOMAINS } from './iocs.js';
 
 const SEVERITY_RANK = { low: 1, medium: 2, high: 3, critical: 4 };
 const BADGE_COLOR = { low: '#607d8b', medium: '#f9a825', high: '#e65100', critical: '#b00020' };
@@ -9,6 +9,8 @@ const BLOCK_RULE_ID = 1;
 
 const FINGERPRINT_TYPES = new Set(['canvas-fp', 'webgl-fp', 'battery-fp', 'behavior-tracking']);
 const CONTROL_TYPES = new Set(['dynamic-code', 'websocket']);
+// Comportements qu'un script de confiance peut avoir légitimement.
+const TRUSTABLE_TYPES = new Set([...FINGERPRINT_TYPES, 'cookie-read']);
 
 // tabId -> Promise<{ alerts: [], frames: {} }>, recopié dans storage.session
 // pour survivre à la mise en veille du service worker.
@@ -33,12 +35,15 @@ async function resetTab(tabId) {
 async function addAlert(tabId, alert) {
   if (tabId < 0) return;
   const state = await getState(tabId);
-  const existing = state.alerts.find((a) => a.type === alert.type && a.detail === alert.detail);
+  // Une alerte = un type + une source : le même script qui recommence n'en crée pas de nouvelle.
+  const key = alert.key || `${alert.type}|${alert.source}`;
+  const existing = state.alerts.find((a) => a.key === key);
   if (existing) {
     existing.count += 1;
+    existing.detail = alert.detail;
     existing.lastTs = Date.now();
   } else {
-    state.alerts.push({ ...alert, count: 1, ts: alert.ts || Date.now(), lastTs: Date.now() });
+    state.alerts.push({ ...alert, key, count: 1, ts: alert.ts || Date.now(), lastTs: Date.now() });
     if (state.alerts.length > MAX_ALERTS) state.alerts.shift();
     if (alert.severity === 'critical') notifyCritical(tabId, state, alert);
   }
@@ -62,9 +67,10 @@ function notifyCritical(tabId, state, alert) {
 
 async function updateBadge(tabId, alerts) {
   try {
-    const worst = alerts.reduce((w, a) =>
+    const counted = alerts.filter((a) => !a.trusted);
+    const worst = counted.reduce((w, a) =>
       (SEVERITY_RANK[a.severity] > SEVERITY_RANK[w] ? a.severity : w), 'low');
-    await chrome.action.setBadgeText({ tabId, text: alerts.length ? String(alerts.length) : '' });
+    await chrome.action.setBadgeText({ tabId, text: counted.length ? String(counted.length) : '' });
     await chrome.action.setBadgeBackgroundColor({ tabId, color: BADGE_COLOR[worst] });
   } catch {
     // L'onglet a pu être fermé entre-temps.
@@ -75,6 +81,15 @@ async function updateBadge(tabId, alerts) {
 
 function matchesDomain(host, list) {
   return list.find((d) => host === d || host.endsWith('.' + d));
+}
+
+function hostOf(url) {
+  try { return new URL(url).hostname; } catch { return ''; }
+}
+
+// Approximation du domaine enregistrable : "a.b.example.com" -> "example.com"
+function baseDomain(host) {
+  return host.split('.').slice(-2).join('.');
 }
 
 function isPublicIPv4(host) {
@@ -104,43 +119,40 @@ function checkUrl({ tabId, url, type, frameId, initiator }) {
   try { u = new URL(url); } catch { return; }
   const host = u.hostname;
   const base = { source: url.slice(0, 300), frame: `cadre #${frameId}`, inFrame: frameId !== 0, origin: 'réseau' };
+  // Côté réseau, on regroupe par type + hôte (les URL changent à chaque requête).
+  const raise = (alertType, severity, detail) =>
+    addAlert(tabId, { ...base, type: alertType, severity, detail, key: `${alertType}|${host}` });
 
   const ioc = matchesDomain(host, IOC_DOMAINS);
   if (ioc) {
-    addAlert(tabId, { ...base, type: 'ioc-domain', severity: 'critical',
-      detail: `Requête vers un domaine de l'infrastructure Discover-Tech / Candiru : ${host}` });
+    raise('ioc-domain', 'critical', `Requête vers un domaine de l'infrastructure Discover-Tech / Candiru : ${host}`);
   }
 
   if (/\/getAd\b/i.test(u.pathname)) {
-    addAlert(tabId, { ...base, type: 'ad-loader', severity: 'medium',
-      detail: `Chargeur publicitaire /getAd (schéma Discover-Tech) sur ${host}` });
+    raise('ad-loader', 'medium', `Chargeur publicitaire /getAd (schéma Discover-Tech) sur ${host}`);
   }
 
   if (matchesDomain(host, DOH_HOSTS) || u.pathname === '/dns-query' ||
       (host === 'dns.google' && u.pathname.startsWith('/resolve'))) {
-    addAlert(tabId, { ...base, type: 'doh-from-page', severity: 'high',
-      detail: `Résolution DNS chiffrée lancée par la page : ${host}${u.pathname}` });
+    raise('doh-from-page', 'high', `Résolution DNS chiffrée lancée par la page : ${host}${u.pathname}`);
   }
 
   if (isPublicIPv4(host) && type !== 'main_frame') {
     let pageHost = '';
     try { pageHost = initiator ? new URL(initiator).hostname : ''; } catch {}
     if (!isPublicIPv4(pageHost)) {
-      addAlert(tabId, { ...base, type: 'raw-ip', severity: 'high',
-        detail: `Contact direct d'une adresse IP sans nom de domaine : ${host}` });
+      raise('raw-ip', 'high', `Contact direct d'une adresse IP sans nom de domaine : ${host}`);
     }
   }
 
   const query = safeDecode(u.search);
   if (/[?&]cookies?=/i.test(u.search) &&
       (query.includes('~~~') || /(_ga|_gid|__gads|_pbjs|sess|token|jwt)/i.test(query))) {
-    addAlert(tabId, { ...base, type: 'cookie-exfil', severity: 'high',
-      detail: `Cookies de la page envoyés dans une URL vers ${host}` });
+    raise('cookie-exfil', 'high', `Cookies de la page envoyés dans une URL vers ${host}`);
   }
 
   if (host.endsWith('.cloudfront.net') && type === 'sub_frame' && !ioc) {
-    addAlert(tabId, { ...base, type: 'cloudfront-frame', severity: 'low',
-      detail: `Cadre chargé depuis un hôte CloudFront anonyme : ${host}` });
+    raise('cloudfront-frame', 'low', `Cadre chargé depuis un hôte CloudFront anonyme : ${host}`);
   }
 }
 
@@ -152,11 +164,16 @@ async function onPageEvent(evt, sender) {
   const tabId = sender.tab ? sender.tab.id : -1;
   if (tabId < 0 || !SEVERITY_RANK[evt.severity]) return;
   const frameId = sender.frameId || 0;
-  await addAlert(tabId, { ...evt, origin: 'page', frameId });
+  const sourceHost = hostOf(evt.source);
+  const trusted = TRUSTABLE_TYPES.has(evt.type) && Boolean(matchesDomain(sourceHost, TRUSTED_SCRIPT_DOMAINS));
+  await addAlert(tabId, { ...evt, origin: 'page', frameId, ...(trusted && { severity: 'low', trusted: true }) });
+  if (trusted) return;
+
+  const state = await getState(tabId);
+  await checkUnknownProfiler(tabId, state, evt, sourceHost, sender);
 
   // Corrélation : empreinte + exécution de code distant dans le même cadre
   // = comportement typique du SDK décrit par Confiant.
-  const state = await getState(tabId);
   const frame = state.frames[frameId] || (state.frames[frameId] = { types: [], flagged: false });
   if (!frame.types.includes(evt.type)) frame.types.push(evt.type);
   const fp = frame.types.filter((t) => FINGERPRINT_TYPES.has(t));
@@ -173,6 +190,32 @@ async function onPageEvent(evt, sender) {
       origin: 'corrélation'
     });
   }
+}
+
+// Un script d'un domaine tiers qui prend l'empreinte de l'appareil ET lit les cookies
+// du site construit un profil de l'utilisateur, même sans canal C2.
+async function checkUnknownProfiler(tabId, state, evt, sourceHost, sender) {
+  const pageHost = hostOf(sender.tab && sender.tab.url);
+  if (!sourceHost || !pageHost || baseDomain(sourceHost) === baseDomain(pageHost)) return;
+
+  state.sources = state.sources || {};
+  const src = state.sources[sourceHost] || (state.sources[sourceHost] = { types: [], flagged: false });
+  if (!src.types.includes(evt.type)) src.types.push(evt.type);
+  const fp = src.types.filter((t) => FINGERPRINT_TYPES.has(t));
+  if (src.flagged || fp.length === 0 || !src.types.includes('cookie-read')) return;
+
+  src.flagged = true;
+  await addAlert(tabId, {
+    type: 'unknown-profiler',
+    severity: 'high',
+    detail: `Le script tiers ${sourceHost} prend l'empreinte de l'appareil (${fp.join(', ')}) et lit les cookies de ${pageHost}`,
+    source: evt.source,
+    frame: evt.frame,
+    inFrame: evt.inFrame,
+    inheritsOrigin: evt.inheritsOrigin,
+    origin: 'corrélation',
+    key: `unknown-profiler|${sourceHost}`
+  });
 }
 
 // --- Blocage optionnel des IOC ----------------------------------------------

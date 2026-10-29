@@ -49,6 +49,11 @@ et ouvrir le popup. La démo ne contacte que des domaines `.invalid` et une IP d
 Le bouton **Bloquer les domaines IOC connus** ajoute une règle `declarativeNetRequest` qui bloque la liste de `iocs.js`.
 Chaque alerte **critique** déclenche aussi une notification système (une seule par type et par page).
 
+Un script d'un domaine tiers qui **prend l'empreinte de l'appareil et lit les cookies** du site est signalé
+comme « Script tiers qui profile », même sans canal C2. Les scripts courants et légitimes listés dans
+`TRUSTED_SCRIPT_DOMAINS` (Google Analytics, reCAPTCHA…) apparaissent en « Confiance » et ne comptent pas
+dans le badge, sauf s'ils exécutent du code dynamique ou ouvrent un canal.
+
 ## Développement
 
 Les tests de l'analyse réseau et de la corrélation tournent sous Node.js 22 ou plus récent, sans dépendance :
@@ -70,7 +75,7 @@ La capture du README vient de `docs/preview.html`, qui affiche le vrai popup ave
 - `inject.js` : sondes dans le contexte de la page (world MAIN), dans tous les cadres.
 - `content.js` : relais des événements vers le service worker.
 - `background.js` : analyse réseau (`webRequest`), corrélation par cadre, badge et blocage.
-- `iocs.js` : indicateurs de compromission et serveurs DoH ; à mettre à jour.
+- `iocs.js` : indicateurs de compromission, serveurs DoH et scripts de confiance ; à mettre à jour.
 - `popup.*` : interface des alertes, export JSON.
 - `icons/` : icônes générées par `scripts/make-icons.ps1`.
 - `tests/` : tests Node.js avec un faux objet `chrome`.

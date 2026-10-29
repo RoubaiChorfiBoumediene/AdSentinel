@@ -96,6 +96,7 @@ li.medium .sev { color: var(--medium); }
 li.high .sev { color: var(--high); }
 li.critical .sev { color: var(--critical); }
 li.low .sev { color: var(--low); }
+li.trusted { opacity: .6; border-left-style: dashed; }
 
 .detail { margin: 4px 0; }
 .why { margin: 4px 0; color: var(--muted); font-style: italic; }

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AdSentinel",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Détecte les comportements suspects des publicités : empreinte d'appareil, code distant, vol de cookies, canal C2 (cas Discover-Tech / Candiru).",
   "author": "Roubai Chorfi Boumediene",
   "homepage_url": "https://github.com/RoubaiChorfiBoumediene/AdSentinel",
