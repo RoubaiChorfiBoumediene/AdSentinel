@@ -3,6 +3,8 @@
 Extension Chrome / Edge (Manifest V3) qui détecte les comportements suspects des publicités,
 à partir des techniques décrites dans les rapports Confiant et Citizen Lab sur Discover-Tech et Candiru (2026).
 
+Créée par **Roubai Chorfi Boumediene**.
+
 ## Installation
 
 1. Ouvrir `chrome://extensions` (ou `edge://extensions`).
@@ -56,3 +58,16 @@ Le bouton **Bloquer les domaines IOC connus** ajoute une règle `declarativeNetR
 - Une page peut fabriquer de fausses alertes en déclenchant l'événement `__adsentinel`.
 - Faux positifs possibles : visioconférence (WebRTC), régies légitimes (`/getAd`), scripts anti-fraude (empreinte).
   C'est la **combinaison** de signaux dans un cadre publicitaire qui compte.
+
+## Licence et crédits
+
+Distribué sous licence **MIT** : voir [LICENSE](LICENSE).
+Tu peux utiliser, modifier et redistribuer ce code, y compris dans un projet commercial,
+à condition de **conserver la mention de copyright et le texte de la licence**.
+
+Si tu t'appuies sur AdSentinel dans un projet, un article ou une présentation, cite-le ainsi :
+
+> AdSentinel, par Roubai Chorfi Boumediene — https://github.com/RoubaiChorfiBoumediene/AdSentinel
+
+Sources des indicateurs : rapports de [Confiant](https://www.confiant.com/) et du
+[Citizen Lab](https://citizenlab.ca/research/how-discover-tech-turned-targeted-ads-into-a-pipeline-for-spyware/).
