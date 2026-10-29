@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>AdSentinel</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1>AdSentinel</h1>
+      <p id="host" class="muted"></p>
+    </div>
+    <div id="verdict" class="verdict"></div>
+  </header>
+
+  <section class="controls">
+    <label class="toggle">
+      <input type="checkbox" id="blocking">
+      <span>Bloquer les domaines IOC connus</span>
+    </label>
+    <div class="buttons">
+      <button id="export">Exporter JSON</button>
+      <button id="clear">Effacer</button>
+    </div>
+  </section>
+
+  <ul id="alerts"></ul>
+  <p id="empty" class="muted empty" hidden>Aucun comportement suspect détecté sur cette page.</p>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "AdSentinel",
+  "version": "1.0.0",
+  "description": "Détecte les comportements suspects des publicités : empreinte d'appareil, code distant, vol de cookies, canal C2 (cas Discover-Tech / Candiru).",
+  "permissions": ["storage", "webRequest", "declarativeNetRequest"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "AdSentinel"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["inject.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true,
+      "match_origin_as_fallback": true,
+      "world": "MAIN"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true,
+      "match_origin_as_fallback": true
+    }
+  ]
+}

