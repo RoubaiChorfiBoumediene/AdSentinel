@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AdSentinel – Enregistreur</title>
+  <link rel="stylesheet" href="recorder.css">
+</head>
+<body>
+  <header class="bar">
+    <div>
+      <h1>AdSentinel · Enregistreur</h1>
+      <p class="muted">Journal des visites et code capturé dans les cadres publicitaires</p>
+    </div>
+    <div class="actions">
+      <label class="toggle"><input type="checkbox" id="recording"> Mode enquête</label>
+      <button id="refresh">Actualiser</button>
+      <button id="clear-all" class="danger">Tout effacer</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button data-view="sessions" class="active">Visites</button>
+    <button data-view="captures">Captures</button>
+  </nav>
+
+  <main>
+    <section id="view-sessions" class="split">
+      <aside>
+        <ul id="session-list" class="list"></ul>
+        <p id="no-session" class="muted empty" hidden>Aucune visite enregistrée. Active le mode enquête, puis recharge la page à analyser.</p>
+      </aside>
+      <article id="session-detail">
+        <p class="muted empty">Choisis une visite à gauche.</p>
+      </article>
+    </section>
+
+    <section id="view-captures" hidden>
+      <table class="grid">
+        <thead>
+          <tr><th>Type</th><th>Taille</th><th>SHA-256</th><th>Vu</th><th>Première fois</th><th>Page</th><th></th></tr>
+        </thead>
+        <tbody id="capture-rows"></tbody>
+      </table>
+      <p id="no-capture" class="muted empty" hidden>Aucun code capturé pour l'instant.</p>
+      <div id="capture-view" hidden>
+        <div class="capture-head">
+          <strong id="capture-title"></strong>
+          <div class="actions">
+            <a id="capture-vt" target="_blank" rel="noopener noreferrer">Chercher sur VirusTotal</a>
+            <button id="capture-download">Télécharger</button>
+            <button id="capture-close">Fermer</button>
+          </div>
+        </div>
+        <pre id="capture-body"></pre>
+      </div>
+    </section>
+  </main>
+
+  <script src="recorder-ui.js"></script>
+</body>
+</html>

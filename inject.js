@@ -42,10 +42,14 @@
     }
   }
 
+  function emit(channel, payload) {
+    document.dispatchEvent(new CustomEvent('__adsentinel', { detail: JSON.stringify({ channel, ...payload }) }));
+  }
+
   function report(type, severity, detail, source = callerScript()) {
     counts[type] = (counts[type] || 0) + 1;
     if (counts[type] > MAX_PER_TYPE) return;
-    const evt = {
+    emit('alert', {
       type,
       severity,
       detail: String(detail).slice(0, 300),
@@ -54,8 +58,30 @@
       inFrame,
       inheritsOrigin,
       ts: Date.now()
-    };
-    document.dispatchEvent(new CustomEvent('__adsentinel', { detail: JSON.stringify(evt) }));
+    });
+  }
+
+  // Captures : le code reçu est envoyé en entier au service worker, qui calcule son SHA-256.
+  // C'est la seule trace d'un exploit livré une fois, puis effacé.
+  const MAX_CAPTURE_CHARS = 3 * 1024 * 1024;
+  const MAX_CAPTURES_PER_FRAME = 50;
+  const capturedSigs = new Set();
+  function capture(kind, body, encoding = 'text', source = callerScript()) {
+    if (!body || body.length > MAX_CAPTURE_CHARS || capturedSigs.size >= MAX_CAPTURES_PER_FRAME) return;
+    const sig = `${kind}:${body.length}:${body.slice(0, 64)}`;
+    if (capturedSigs.has(sig)) return;
+    capturedSigs.add(sig);
+    emit('capture', { kind, body, encoding, source, frame: frameLabel, inFrame, ts: Date.now() });
+  }
+
+  function toBase64(u8) {
+    let s = '';
+    for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+    return btoa(s);
+  }
+
+  function hexPreview(u8) {
+    return Array.from(u8.subarray(0, 32), (b) => b.toString(16).padStart(2, '0')).join(' ');
   }
 
   // Dans un cadre (emplacement publicitaire typique), un comportement est plus suspect.
@@ -87,8 +113,13 @@
   const NativeFunction = Function;
   const onDynamicCode = (args) => {
     const body = String(args.length ? args[args.length - 1] : '');
+    const src = callerScript();
     report('dynamic-code', inFrameOr(body.length > 500 ? 'medium' : 'low'),
-      `new Function() — ${body.length} caractères : ${body.slice(0, 120)}`);
+      `new Function() — ${body.length} caractères : ${body.slice(0, 120)}`, src);
+    if (inFrame || isThirdParty(src)) {
+      const params = args.slice(0, -1).map(String).join(', ');
+      capture('new-function', `function anonymous(${params}) {\n${body}\n}`, 'text', src);
+    }
   };
   const FunctionProxy = new Proxy(NativeFunction, {
     apply(target, thisArg, args) {
@@ -103,9 +134,48 @@
   window.Function = FunctionProxy;
   NativeFunction.prototype.constructor = FunctionProxy;
 
-  // 2. Canaux persistants vers un C2 (WebSocket, WebRTC)
-  hookConstructor(window, 'WebSocket', (args) =>
-    report('websocket', inFrameOr('medium'), `WebSocket ouvert vers ${args[0]}`));
+  // 2. Canaux persistants vers un C2 (WebSocket, WebRTC).
+  // Chaque message est journalisé ; un message volumineux est capturé (bloc chiffré, code).
+  const MAX_WS_TRACES = 50;
+  const BIG_MESSAGE = 1000;
+  function logWs(direction, url, data) {
+    const t = { channel: 'trace', kind: 'ws', direction, url: String(url).slice(0, 300) };
+    if (typeof data === 'string') {
+      emit('trace', { ...t, size: data.length, preview: data.slice(0, 200) });
+      if (data.length >= BIG_MESSAGE) capture(`websocket-${direction}`, data);
+      return;
+    }
+    let u8 = null;
+    if (data instanceof ArrayBuffer) u8 = new Uint8Array(data);
+    else if (ArrayBuffer.isView(data)) u8 = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    if (u8) {
+      emit('trace', { ...t, size: u8.length, preview: hexPreview(u8), binary: true });
+      if (u8.length >= BIG_MESSAGE) capture(`websocket-${direction}`, toBase64(u8), 'base64');
+    } else if (data instanceof Blob) {
+      emit('trace', { ...t, size: data.size, preview: '(Blob)', binary: true });
+      if (data.size >= BIG_MESSAGE) {
+        data.arrayBuffer().then((b) => capture(`websocket-${direction}`, toBase64(new Uint8Array(b)), 'base64')).catch(() => {});
+      }
+    }
+  }
+  const NativeWebSocket = window.WebSocket;
+  if (typeof NativeWebSocket === 'function') {
+    window.WebSocket = new Proxy(NativeWebSocket, {
+      construct(target, args, newTarget) {
+        const ws = Reflect.construct(target, args, newTarget);
+        try {
+          report('websocket', inFrameOr('medium'), `WebSocket ouvert vers ${args[0]}`);
+          let n = 0;
+          ws.addEventListener('message', (e) => { if (n++ < MAX_WS_TRACES) logWs('in', ws.url, e.data); });
+        } catch {}
+        return ws;
+      }
+    });
+    let sent = 0;
+    hookMethod(NativeWebSocket.prototype, 'send', (args, ws) => {
+      if (sent++ < MAX_WS_TRACES) logWs('out', ws.url, args[0]);
+    });
+  }
   hookConstructor(window, 'RTCPeerConnection', () =>
     report('webrtc', inFrameOr('low'), 'Connexion WebRTC créée (canal caché ou fuite d\'IP derrière un VPN)'));
 
@@ -142,7 +212,68 @@
   hookMethod(Navigator.prototype, 'getBattery', () =>
     report('battery-fp', 'low', 'Lecture de l\'état de la batterie (navigator.getBattery)'));
 
-  // 5. Surveillance du comportement depuis un cadre (souris, clavier, défilement…)
+  // 5. Signes d'exploitation d'une faille du navigateur.
+  // WebAssembly : très utilisé par les exploits récents ; le module est capturé en entier.
+  const Wasm = window.WebAssembly;
+  if (Wasm) {
+    const onWasm = (src, how) => {
+      let u8 = null;
+      if (src instanceof ArrayBuffer) u8 = new Uint8Array(src);
+      else if (ArrayBuffer.isView(src)) u8 = new Uint8Array(src.buffer, src.byteOffset, src.byteLength);
+      if (!u8) return;
+      report('wasm', inFrameOr('low'), `Module WebAssembly compilé (${how}, ${u8.length} octets)`);
+      capture('wasm', toBase64(u8), 'base64');
+    };
+    hookMethod(Wasm, 'compile', (args) => onWasm(args[0], 'compile'));
+    hookMethod(Wasm, 'instantiate', (args) => onWasm(args[0], 'instantiate'));
+    hookConstructor(Wasm, 'Module', (args) => onWasm(args[0], 'Module'));
+    const onStreaming = (args, how) => {
+      Promise.resolve(args[0]).then((r) => r.clone().arrayBuffer()).then((b) => onWasm(b, how)).catch(() => {});
+    };
+    hookMethod(Wasm, 'compileStreaming', (args) => onStreaming(args, 'compileStreaming'));
+    hookMethod(Wasm, 'instantiateStreaming', (args) => onStreaming(args, 'instantiateStreaming'));
+  }
+
+  // Worker lancé depuis du code généré (blob: ou data:) : son script est récupéré et capturé.
+  hookConstructor(window, 'Worker', (args) => {
+    const url = String(args[0]);
+    if (!/^(blob|data):/.test(url)) return;
+    const src = callerScript();
+    report('blob-worker', inFrameOr('medium'), `Worker lancé depuis du code généré (${url.slice(0, 60)})`, src);
+    fetch(url).then((r) => r.text()).then((code) => capture('worker', code, 'text', src)).catch(() => {});
+  });
+
+  // Mémoire partagée : nécessaire à certaines attaques de concurrence.
+  hookConstructor(window, 'SharedArrayBuffer', () =>
+    report('shared-memory', inFrameOr('low'), 'SharedArrayBuffer créé (mémoire partagée entre threads)'));
+
+  // Pulvérisation de la mémoire (« heap spraying ») depuis un cadre : des centaines de grands
+  // tampons alloués en rafale pour placer des données à une adresse prévisible.
+  if (inFrame) {
+    const WINDOW_MS = 2000, BIG = 64 * 1024, MAX_COUNT = 500, MAX_TOTAL = 256 * 1024 * 1024;
+    let windowStart = 0, count = 0, total = 0, flagged = false;
+    const track = (bytes) => {
+      if (flagged || !(bytes >= BIG)) return;
+      const now = Date.now();
+      if (now - windowStart > WINDOW_MS) { windowStart = now; count = 0; total = 0; }
+      count += 1;
+      total += bytes;
+      if (count >= MAX_COUNT || total >= MAX_TOTAL) {
+        flagged = true;
+        report('heap-spray', 'high',
+          `Pulvérisation mémoire : ${count} tampons de 64 Ko ou plus (${Math.round(total / 1048576)} Mo) en moins de 2 s`);
+      }
+    };
+    hookConstructor(window, 'ArrayBuffer', (args) => track(Number(args[0])));
+    for (const name of ['Uint8Array', 'Uint16Array', 'Uint32Array', 'Float32Array', 'Float64Array', 'BigUint64Array']) {
+      const bytesPer = window[name] && window[name].BYTES_PER_ELEMENT;
+      hookConstructor(window, name, (args) => {
+        if (typeof args[0] === 'number') track(args[0] * bytesPer);
+      });
+    }
+  }
+
+  // 6. Surveillance du comportement depuis un cadre (souris, clavier, défilement…)
   if (inFrame) {
     const BEHAVIOR = new Set(['mousemove', 'pointermove', 'keydown', 'keyup', 'scroll',
       'touchstart', 'touchmove', 'visibilitychange', 'submit']);

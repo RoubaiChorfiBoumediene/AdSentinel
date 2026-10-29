@@ -54,6 +54,28 @@ comme « Script tiers qui profile », même sans canal C2. Les scripts courants 
 `TRUSTED_SCRIPT_DOMAINS` (Google Analytics, reCAPTCHA…) apparaissent en « Confiance » et ne comptent pas
 dans le badge, sauf s'ils exécutent du code dynamique ou ouvrent un canal.
 
+## Enregistreur forensique
+
+L'enregistreur garde la trace de **tout ce que font les publicités** pour comprendre comment un exploit est livré.
+Il s'ouvre depuis le popup (**Ouvrir l'enregistreur**).
+
+- **Mode enquête** (case du popup) : journal complet de chaque visite. Il garde chaque requête, chaque
+  redirection avec son code HTTP, chaque réponse avec l'IP du serveur, l'arbre des cadres (qui charge qui),
+  les pop-ups ouverts par une pub, les alertes et les messages WebSocket. Il garde les 30 dernières visites,
+  jusqu'à 5 000 événements chacune.
+- **Captures, toujours actives** : le code reçu par un cadre publicitaire ou un script tiers est enregistré
+  en entier avec son **SHA-256**. Cela couvre le corps de `new Function`, les modules WebAssembly, les scripts
+  de Worker générés et les gros messages WebSocket, soit jusqu'à 200 captures de 2 Mo chacune. Un exploit
+  n'est envoyé qu'une fois : la capture est souvent la seule preuve.
+- **Signes d'exploitation** : compilation WebAssembly, pulvérisation mémoire (500 tampons de 64 Ko ou plus
+  en moins de 2 s, depuis un cadre), Worker lancé depuis du code généré, `SharedArrayBuffer`.
+
+Dans la page Enregistreur, la chronologie se filtre par type d'événement, par cadre et par mot-clé.
+Une visite s'exporte en JSON avec le code capturé, et chaque capture se télécharge (`.wasm`, `.bin`
+ou `.js.txt`, pour ne pas s'exécuter par un double-clic) ou se cherche sur VirusTotal par son empreinte.
+
+> Analyse le code capturé dans une machine virtuelle isolée, jamais sur ton poste principal.
+
 ## Développement
 
 Les tests de l'analyse réseau et de la corrélation tournent sous Node.js 22 ou plus récent, sans dépendance :
@@ -75,6 +97,8 @@ La capture du README vient de `docs/preview.html`, qui affiche le vrai popup ave
 - `inject.js` : sondes dans le contexte de la page (world MAIN), dans tous les cadres.
 - `content.js` : relais des événements vers le service worker.
 - `background.js` : analyse réseau (`webRequest`), corrélation par cadre, badge et blocage.
+- `recorder.js` : journal des visites et captures de code (SHA-256), côté service worker.
+- `recorder.*`, `recorder-ui.js` : page Enregistreur (chronologie, arbre des cadres, captures).
 - `iocs.js` : indicateurs de compromission, serveurs DoH et scripts de confiance ; à mettre à jour.
 - `popup.*` : interface des alertes, export JSON.
 - `icons/` : icônes générées par `scripts/make-icons.ps1`.
@@ -83,7 +107,10 @@ La capture du README vient de `docs/preview.html`, qui affiche le vrai popup ave
 
 ## Limites
 
-- **Ne détecte pas l'exploit lui-même** : seulement la préparation (empreinte, canal C2, livraison).
+- **Ne reconnaît pas une faille inconnue par sa signature** : il capture le code livré et repère les signes
+  d'exploitation (WebAssembly, pulvérisation mémoire, Worker généré). Ce qui se passe hors du navigateur
+  (sortie du bac à sable, implant) relève d'un outil système comme Sysmon.
+- La pulvérisation mémoire n'est surveillée que dans les cadres, pour ne pas ralentir les sites.
 - Un attaquant qui connaît l'extension peut repérer les sondes (Proxy) et ne rien faire.
   C'est d'ailleurs un effet utile : le SDK reste silencieux face à un environnement d'analyse.
 - `eval` n'est pas surveillé, car l'envelopper casse le comportement de `eval` direct.

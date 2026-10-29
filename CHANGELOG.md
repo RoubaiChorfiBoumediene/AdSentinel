@@ -1,5 +1,18 @@
 # Journal des modifications
 
+## 1.3.0
+
+Enregistreur forensique, pour comprendre comment un exploit est livré par une publicité.
+
+- **Mode enquête** : journal complet de chaque visite (requêtes, redirections, réponses avec IP,
+  arbre des cadres, pop-ups, alertes, messages WebSocket), 30 visites gardées.
+- **Captures de code** avec SHA-256 : corps de `new Function`, modules WebAssembly, scripts de Worker
+  générés, gros messages WebSocket. Nouvelle alerte « Code capturé » quand c'est un cadre qui le reçoit.
+- **Signes d'exploitation** : WebAssembly, pulvérisation mémoire, Worker généré, `SharedArrayBuffer`.
+- **Page Enregistreur** : chronologie filtrable, arbre des cadres, visionneuse de captures (texte ou hexadécimal),
+  export JSON d'une visite, téléchargement et recherche VirusTotal des captures.
+- Page de démo : étape d'exploitation simulée. 6 tests supplémentaires (21 au total).
+
 ## 1.2.0
 
 Améliorations issues d'un premier test sur un vrai site de streaming.

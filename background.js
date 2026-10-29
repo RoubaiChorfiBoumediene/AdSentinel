@@ -1,6 +1,7 @@
 // Service worker : analyse les requêtes réseau, reçoit les événements des sondes,
 // corrèle les signaux par cadre et tient le compteur d'alertes de chaque onglet.
 import { IOC_DOMAINS, DOH_HOSTS, TRUSTED_SCRIPT_DOMAINS } from './iocs.js';
+import { initRecorder, startSession, logEvent, storeCapture, handleRecorderMessage } from './recorder.js';
 
 const SEVERITY_RANK = { low: 1, medium: 2, high: 3, critical: 4 };
 const BADGE_COLOR = { low: '#607d8b', medium: '#f9a825', high: '#e65100', critical: '#b00020' };
@@ -8,7 +9,7 @@ const MAX_ALERTS = 300;
 const BLOCK_RULE_ID = 1;
 
 const FINGERPRINT_TYPES = new Set(['canvas-fp', 'webgl-fp', 'battery-fp', 'behavior-tracking']);
-const CONTROL_TYPES = new Set(['dynamic-code', 'websocket']);
+const CONTROL_TYPES = new Set(['dynamic-code', 'websocket', 'wasm', 'blob-worker']);
 // Comportements qu'un script de confiance peut avoir légitimement.
 const TRUSTABLE_TYPES = new Set([...FINGERPRINT_TYPES, 'cookie-read']);
 
@@ -46,6 +47,10 @@ async function addAlert(tabId, alert) {
     state.alerts.push({ ...alert, key, count: 1, ts: alert.ts || Date.now(), lastTs: Date.now() });
     if (state.alerts.length > MAX_ALERTS) state.alerts.shift();
     if (alert.severity === 'critical') notifyCritical(tabId, state, alert);
+    logEvent(tabId, {
+      kind: 'alert', frameId: alert.frameId, alertType: alert.type, severity: alert.severity,
+      detail: alert.detail, source: alert.source, trusted: alert.trusted
+    });
   }
   await chrome.storage.session.set({ [storageKey(tabId)]: state });
   await updateBadge(tabId, state.alerts);
@@ -108,17 +113,25 @@ function analyzeRequest(details) {
   if (tabId < 0 || (initiator && initiator.startsWith('chrome-extension://'))) return;
   if (type === 'main_frame') {
     // Nouvelle page : on repart de zéro avant d'analyser la requête elle-même.
-    resetTab(tabId).then(() => checkUrl(details));
+    Promise.all([resetTab(tabId), startSession(tabId, url)]).then(() => {
+      logRequest(details);
+      checkUrl(details);
+    });
     return;
   }
+  logRequest(details);
   checkUrl({ tabId, url, type, frameId, initiator });
+}
+
+function logRequest({ tabId, url, type, frameId, parentFrameId, method, initiator }) {
+  logEvent(tabId, { kind: 'request', frameId, parentFrameId, url, type, method, initiator });
 }
 
 function checkUrl({ tabId, url, type, frameId, initiator }) {
   let u;
   try { u = new URL(url); } catch { return; }
   const host = u.hostname;
-  const base = { source: url.slice(0, 300), frame: `cadre #${frameId}`, inFrame: frameId !== 0, origin: 'réseau' };
+  const base = { source: url.slice(0, 300), frame: `cadre #${frameId}`, frameId, inFrame: frameId !== 0, origin: 'réseau' };
   // Côté réseau, on regroupe par type + hôte (les URL changent à chaque requête).
   const raise = (alertType, severity, detail) =>
     addAlert(tabId, { ...base, type: alertType, severity, detail, key: `${alertType}|${host}` });
@@ -157,6 +170,7 @@ function checkUrl({ tabId, url, type, frameId, initiator }) {
 }
 
 chrome.webRequest.onBeforeRequest.addListener(analyzeRequest, { urls: ['<all_urls>'] });
+initRecorder();
 
 // --- Événements des sondes et corrélation -----------------------------------
 
@@ -245,9 +259,35 @@ async function handleMessage(msg, sender) {
       return (await chrome.storage.local.get('blocking')).blocking === true;
     case 'set-blocking':
       return setBlocking(Boolean(msg.enabled));
+    case 'page-capture':
+      return onPageCapture(msg.cap, sender);
+    case 'page-trace':
+      return sender.tab && logEvent(sender.tab.id, { ...msg.trace, frameId: sender.frameId || 0 });
     default:
-      return undefined;
+      return handleRecorderMessage(msg);
   }
+}
+
+// Code reçu par la page (corps de new Function, module WebAssembly, script de Worker) :
+// enregistré avec son SHA-256, et signalé quand c'est un cadre qui le reçoit.
+async function onPageCapture(cap, sender) {
+  const tabId = sender.tab ? sender.tab.id : -1;
+  if (tabId < 0 || !cap) return undefined;
+  const stored = await storeCapture(tabId, { ...cap, frameId: sender.frameId || 0 }, sender.tab.url);
+  if (stored && cap.inFrame) {
+    await addAlert(tabId, {
+      type: 'payload-captured',
+      severity: 'high',
+      detail: `Code reçu par un cadre et enregistré (${cap.kind}, ${Math.round(stored.size / 1024)} Ko, SHA-256 ${stored.sha256.slice(0, 16)}…)`,
+      source: cap.source,
+      frame: cap.frame,
+      inFrame: true,
+      frameId: sender.frameId || 0,
+      origin: 'capture',
+      key: `payload-captured|${stored.sha256}`
+    });
+  }
+  return stored;
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {

@@ -63,8 +63,16 @@
     try { new WebSocket('wss://adsentinel-test.invalid/c2'); } catch (e) {}
     fetch('https://adsentinel-test.invalid/getAd?impid=demo').catch(() => {});
 
-    // 6. Exécution de code « reçu du C2 »
-    new Function('return "code distant exécuté"')();
+    // 6. Exécution de code « reçu du C2 » (capturé avec son SHA-256)
+    new Function('/* charge utile simulée */ return "code distant exécuté"')();
+
+    // 7. Signes d'exploitation simulés, sans aucune faille réelle :
+    //    un module WebAssembly vide, une rafale de tampons mémoire, un Worker généré.
+    WebAssembly.compile(new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00])).catch(() => {});
+    const spray = [];
+    for (let i = 0; i < 600; i++) spray.push(new ArrayBuffer(64 * 1024));
+    spray.length = 0;
+    new Worker(URL.createObjectURL(new Blob(['/* worker simulé */ postMessage("ok");'], { type: 'text/javascript' })));
   `;
 
   document.getElementById('run').addEventListener('click', () => {

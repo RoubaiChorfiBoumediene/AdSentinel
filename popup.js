@@ -66,6 +66,26 @@ const TYPE_INFO = {
   'unknown-profiler': {
     label: 'Script tiers qui profile',
     why: 'Un domaine extérieur au site relève l\'empreinte de l\'appareil et lit les cookies : il peut te reconnaître d\'un site à l\'autre.'
+  },
+  'payload-captured': {
+    label: 'Code capturé',
+    why: 'Le code reçu par ce cadre est enregistré avec son SHA-256 : ouvre l\'enregistreur pour l\'analyser ou le soumettre à VirusTotal.'
+  },
+  'wasm': {
+    label: 'Module WebAssembly',
+    why: 'Beaucoup d\'exploits de navigateur récents passent par WebAssembly ; le module est capturé.'
+  },
+  'heap-spray': {
+    label: 'Pulvérisation mémoire',
+    why: 'Des centaines de grands tampons alloués en rafale : technique classique pour exploiter une faille mémoire.'
+  },
+  'blob-worker': {
+    label: 'Worker généré',
+    why: 'Un thread lancé depuis du code fabriqué à la volée ; son script est capturé.'
+  },
+  'shared-memory': {
+    label: 'Mémoire partagée',
+    why: 'SharedArrayBuffer sert à certaines attaques de concurrence entre threads.'
   }
 };
 
@@ -147,6 +167,12 @@ async function init() {
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   });
+
+  $('recording').checked = await chrome.runtime.sendMessage({ kind: 'get-recording' });
+  $('recording').addEventListener('change', (e) =>
+    chrome.runtime.sendMessage({ kind: 'set-recording', enabled: e.target.checked }));
+  $('open-recorder').addEventListener('click', () =>
+    chrome.tabs.create({ url: chrome.runtime.getURL('recorder.html') }));
 
   await refresh();
   // Les alertes continuent d'arriver pendant que le popup est ouvert.
